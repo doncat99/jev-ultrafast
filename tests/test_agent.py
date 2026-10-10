@@ -9,7 +9,7 @@ import pytest
 
 from jev_ultrafast import agent as loop
 from jev_ultrafast import model
-from jev_ultrafast.browser import StalePage, browser_operation, fingerprint
+from jev_ultrafast.browser import Browser, StalePage, browser_operation, fingerprint
 
 
 def page():
@@ -72,6 +72,19 @@ def test_one_index_per_node_with_operation_specific_targets():
     assert targets["CLICK"]["1"]["id"] == "e2"
     assert targets["CLICK"]["2"]["id"] == "e3"
     assert "WAIT" in controls
+
+
+def test_click_freshness_ignores_unrelated_form_mutation_but_keeps_target_guard():
+    browser = Browser.__new__(Browser)
+    browser.evaluate = Mock(return_value=[[123, "https://example.test/"], [7, "button", "2023"]])
+    observed = {"page_key": [123, "https://example.test/", 0, 0, 1120, 780, [[9, "", False]]],
+                "guards": {"7": [7, "button", "2023"]}}
+    action = {"kind": "click", "node": 7}
+    assert browser.fresh(observed, action)
+    browser.evaluate.assert_called_once()
+
+    browser.evaluate.return_value = [[123, "https://example.test/"], [8, "button", "2023"]]
+    assert not browser.fresh(observed, action)
 
 
 def test_all_heads_are_one_request_and_only_matching_head_executes(monkeypatch):

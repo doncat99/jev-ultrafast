@@ -21,6 +21,7 @@ class Browser:
     def __init__(self, url):
         ensure_daemon()
         self.target = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
+        self._known_targets = {self.target}
         self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
@@ -76,9 +77,12 @@ class Browser:
                 pass
         for attempt in range(10):
             try:
-                return browser_operation(
+                page = browser_operation(
                     {"operation": "observe", "session": self.session, "screenshot": screenshot}
                 )
+                if page is not None:
+                    page["result_observation"] = self._result_observation()
+                return page
             except StalePage:
                 if attempt == 9:
                     raise
@@ -92,10 +96,37 @@ class Browser:
                 return False
             current = self.evaluate(
                 "(() => { const c=window.__jevFast; "
-                f"return c ? [c.pageKey(),c.guard(c.nodes.get({node}))] : null; }})()"
+                f"return c ? [c.pageKey().slice(0,2),c.guard(c.nodes.get({node}))] : null; }})()"
             )
-            return current == [page["page_key"], page["guards"].get(str(node))]
+            # Ignore unrelated form mutations, but keep document and target identity.
+            # The executor still rechecks visibility, hit testing, and disabled state.
+            return current == [[page["page_key"][0], page["page_key"][1]], page["guards"].get(str(node))]
         return self.evaluate(MARKER) == page["marker"]
+
+    def _result_observation(self):
+        targets = self.call("Target.getTargets").get("targetInfos", [])
+        new_targets = [
+            t for t in targets
+            if t.get("targetId") not in self._known_targets and t.get("openerId") == self.target
+        ]
+        self._known_targets.update(t.get("targetId") for t in new_targets)
+        resources = self.evaluate("""(() => [...document.querySelectorAll(
+          'a[href],area[href],iframe[src],embed[src],object[data],link[href]'
+        )].map(e => ({
+          tag:e.tagName.toLowerCase(),
+          text:(e.innerText||e.getAttribute('title')||e.getAttribute('aria-label')||'').trim(),
+          url:e.href || e.src || e.data || e.getAttribute('href') || e.getAttribute('src')
+        })).filter(x => x.url && (
+          /\\.(pdf)(?:[?#]|$)/i.test(x.url) ||
+          /report|annual|sustainab|esg|download/i.test(`${x.text} ${x.url}`)
+        )).slice(0,100))()""") or []
+        return {
+            "targets": [
+                {"target_id": t.get("targetId"), "type": t.get("type"), "url": t.get("url"), "title": t.get("title")}
+                for t in new_targets
+            ],
+            "resources": resources,
+        }
 
     def act(self, action, page, text=None):
         if not self.fresh(page, action):
