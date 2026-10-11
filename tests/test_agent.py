@@ -331,3 +331,26 @@ def test_navigation_during_prediction_reobserves_without_action(runner):
     assert runner.state["status"] == "ready"
     assert runner.state["decision"] is None
     runner.state["browser"].act.assert_not_called()
+
+
+def test_navigation_recovery_retries_until_document_settles(runner, monkeypatch):
+    monkeypatch.setattr(loop.time, "sleep", lambda _seconds: None)
+    runner.state["browser"].fresh.side_effect = StalePage("Document navigating")
+    runner.state["browser"].observe.side_effect = [StalePage("still navigating"), page()]
+
+    runner.command("tick")
+
+    assert runner.state["status"] == "ready"
+    assert runner.state["page"]["url"] == page()["url"]
+    assert runner.state["browser"].observe.call_count == 2
+
+
+def test_navigation_recovery_is_bounded(runner, monkeypatch):
+    monkeypatch.setattr(loop.time, "sleep", lambda _seconds: None)
+    runner.state["browser"].fresh.side_effect = StalePage("Document navigating")
+    runner.state["browser"].observe.side_effect = StalePage("never settles")
+
+    with pytest.raises(StalePage, match="never settles"):
+        runner.command("tick")
+
+    assert runner.state["browser"].observe.call_count == 40

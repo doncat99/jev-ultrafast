@@ -10,6 +10,16 @@ from .questions import MAX_STEPS
 
 
 class Agent:
+    def _observe_after_navigation(self):
+        # Keep navigation recovery bounded; a page that never settles is a real failure.
+        for attempt in range(40):
+            try:
+                return self.state["browser"].observe(screenshot=self.screenshots)
+            except StalePage:
+                if attempt == 39:
+                    raise
+                time.sleep(0.25)
+
     def __init__(self, url, goals, *, record_dir=None, screenshots=False):
         task = goals.strip() if isinstance(goals, str) else "\n".join(goals).strip()
         if not task:
@@ -59,7 +69,7 @@ class Agent:
             except StalePage:
                 state["decision"] = None
                 state["status"] = "ready"
-                state["page"] = state["browser"].observe(screenshot=self.screenshots)
+                state["page"] = self._observe_after_navigation()
                 state["elapsed_ms"] = round((time.perf_counter() - state["started_at"]) * 1000)
                 return self.snapshot()
         elif name == "predict":
