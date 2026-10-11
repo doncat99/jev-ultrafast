@@ -264,6 +264,55 @@ def test_executor_rejects_a_stale_page_before_browser_input(monkeypatch):
     operation.assert_not_called()
 
 
+def test_result_observation_attaches_new_page_target_and_keeps_evidence(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.target = "opener"
+    b.session = "session-opener"
+    b._known_targets = {"opener"}
+    b._owned_targets = {"opener"}
+    b._sessions = {"opener": "session-opener"}
+    b._owned_frame_ids = set()
+    b.evaluate = Mock(return_value=[])
+
+    def cdp(method, **params):
+        if method == "Target.getTargets":
+            return {"targetInfos": [
+                {"targetId": "worker", "type": "worker", "openerId": "opener", "url": "https://x/worker"},
+                {"targetId": "popup", "type": "page", "openerFrameId": "frame-opener", "url": "https://x/report.pdf"},
+            ]}
+        if method == "Page.getFrameTree":
+            return {"frameTree": {"frame": {"id": "frame-opener"}}}
+        if method == "Target.attachToTarget":
+            assert params["targetId"] == "popup"
+            return {"sessionId": "session-popup"}
+        return {}
+
+    monkeypatch.setattr(browser, "cdp", cdp)
+    observation = b._result_observation()
+    assert b.target == "popup" and b.session == "session-popup"
+    assert observation["targets"] == [
+        {"target_id": "worker", "type": "worker", "url": "https://x/worker", "title": None},
+        {"target_id": "popup", "type": "page", "url": "https://x/report.pdf", "title": None},
+    ]
+    assert b._sessions == {"opener": "session-opener", "popup": "session-popup"}
+
+
+def test_close_reclaims_all_owned_targets(monkeypatch):
+    import jev_ultrafast.browser as browser
+
+    b = browser.Browser.__new__(browser.Browser)
+    b.target = "popup"
+    b.session = "session-popup"
+    b._owned_targets = {"opener", "popup"}
+    closed = []
+    monkeypatch.setattr(browser, "cdp", lambda method, **params: closed.append((method, params["targetId"])))
+    b.close()
+    assert {target for method, target in closed if method == "Target.closeTarget"} == {"opener", "popup"}
+    assert b.target is None and b.session is None and b._owned_targets == set()
+
+
 @pytest.mark.parametrize("response", [{"exceptionDetails": {}}, {"result": {}}])
 def test_interrupted_dropdown_mutation_cannot_be_retried_as_stale(monkeypatch, response):
     import jev_ultrafast.browser as browser

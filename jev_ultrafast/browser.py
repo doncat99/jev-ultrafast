@@ -23,6 +23,9 @@ class Browser:
         self.target = cdp("Target.createTarget", url="about:blank", background=True)["targetId"]
         self._known_targets = {self.target}
         self.session = cdp("Target.attachToTarget", targetId=self.target, flatten=True)["sessionId"]
+        self._owned_targets = {self.target}
+        self._sessions = {self.target: self.session}
+        self._owned_frame_ids = set()
         self.call("Emulation.setDeviceMetricsOverride", width=1120, height=780, deviceScaleFactor=1, mobile=False)
         # Keep rAF/menus rendering in an owned background tab, without activating the user's Chrome tab.
         self.call("Emulation.setFocusEmulationEnabled", enabled=True)
@@ -81,7 +84,24 @@ class Browser:
                     {"operation": "observe", "session": self.session, "screenshot": screenshot}
                 )
                 if page is not None:
-                    page["result_observation"] = self._result_observation()
+                    previous_target = self.target
+                    observation = self._result_observation()
+                    if self.target != previous_target:
+                        # The popup is now the active document; do not give the model
+                        # one stale decision cycle on the opener page.
+                        for attempt in range(10):
+                            page = browser_operation(
+                                {"operation": "observe", "session": self.session, "screenshot": screenshot}
+                            )
+                            if page.get("url") != "about:blank" or page.get("text"):
+                                break
+                            if attempt < 9:
+                                time.sleep(0.05)
+                        current = self._result_observation()
+                        current["targets"] = observation["targets"] + current["targets"]
+                        current["resources"] = observation["resources"] + current["resources"]
+                        observation = current
+                    page["result_observation"] = observation
                 return page
             except StalePage:
                 if attempt == 9:
@@ -104,12 +124,6 @@ class Browser:
         return self.evaluate(MARKER) == page["marker"]
 
     def _result_observation(self):
-        targets = self.call("Target.getTargets").get("targetInfos", [])
-        new_targets = [
-            t for t in targets
-            if t.get("targetId") not in self._known_targets and t.get("openerId") == self.target
-        ]
-        self._known_targets.update(t.get("targetId") for t in new_targets)
         resources = self.evaluate("""(() => {
           const fields = ['href','src','data','data-url','data-href','data-itemid','rel','addthis:url'];
           const text = e => (e.innerText || e.getAttribute('title') || e.getAttribute('aria-label') ||
@@ -134,6 +148,48 @@ class Browser:
             x.identifier)
             .filter((x,i,a) => a.findIndex(y => y.url === x.url && y.field === x.field) === i).slice(0,100);
         })()""") or []
+        frame_ids = set(getattr(self, "_owned_frame_ids", ()))
+        try:
+            frames = self.call("Page.getFrameTree").get("frameTree", {})
+            stack = [frames] if frames else []
+            while stack:
+                frame = stack.pop()
+                if frame.get("frame", {}).get("id"):
+                    frame_ids.add(frame["frame"]["id"])
+                stack.extend(frame.get("childFrames", []))
+        except (KeyError, RuntimeError):
+            pass
+        targets = self.call("Target.getTargets").get("targetInfos", [])
+        new_targets = [
+            t for t in targets
+            if t.get("targetId") not in self._known_targets
+            and (t.get("openerId") in self._owned_targets or t.get("openerFrameId") in frame_ids)
+        ]
+        page_targets = [t for t in new_targets if t.get("type") == "page"]
+        # A popup can be reported as about:blank before its navigation commits.
+        for _ in range(4):
+            usable = [t for t in page_targets if t.get("url") != "about:blank"]
+            if usable or not page_targets:
+                break
+            time.sleep(0.05)
+            targets = self.call("Target.getTargets").get("targetInfos", [])
+            new_targets = [
+                t for t in targets
+                if t.get("targetId") not in self._known_targets
+                and (t.get("openerId") in self._owned_targets or t.get("openerFrameId") in frame_ids)
+            ]
+            page_targets = [t for t in new_targets if t.get("type") == "page"]
+        self._known_targets.update(t.get("targetId") for t in new_targets)
+        usable = [t for t in page_targets if t.get("url") != "about:blank"]
+        if usable:
+            selected = usable[-1]
+            attached = cdp("Target.attachToTarget", targetId=selected["targetId"], flatten=True)
+            self._owned_targets.add(selected["targetId"])
+            self._sessions[selected["targetId"]] = attached["sessionId"]
+            self.target = selected["targetId"]
+            self.session = attached["sessionId"]
+            self._owned_frame_ids = set(getattr(self, "_owned_frame_ids", ())) | frame_ids
+            self.call("Emulation.setFocusEmulationEnabled", enabled=True)
         return {
             "targets": [
                 {"target_id": t.get("targetId"), "type": t.get("type"), "url": t.get("url"), "title": t.get("title")}
@@ -152,9 +208,15 @@ class Browser:
         return result
 
     def close(self):
-        if self.target:
-            cdp("Target.closeTarget", targetId=self.target)
-            self.target = None
+        for target in list(getattr(self, "_owned_targets", ())):
+            try:
+                cdp("Target.closeTarget", targetId=target)
+            except RuntimeError:
+                pass
+        self._owned_targets = set()
+        self._sessions = {}
+        self.target = None
+        self.session = None
 
 
 def fingerprint(state):
@@ -193,7 +255,9 @@ def browser_operation(request):
               if (action.kind==='fill' && (e.readOnly || e.getAttribute('aria-readonly')==='true')) return null;
               const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
               if (!r.width || !r.height || x<0 || y<0 || x>=innerWidth || y>=innerHeight) return null;
-              if (!e.contains(document.elementFromPoint(x,y))) return null;
+              const point=document.elementFromPoint(x,y);
+              const label=e.id ? [...document.querySelectorAll('label')].find(l=>l.htmlFor===e.id) : null;
+              if (!point || !(e.contains(point) || label?.contains(point))) return null;
               if (action.kind==='select') {
                 if (e.tagName!=='SELECT' || ![...e.options].some(o=>o.value===action.value &&
                     !o.disabled && !o.closest('optgroup[disabled]'))) return null;
