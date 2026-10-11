@@ -25,10 +25,11 @@
     'option','gridcell','combobox','textbox','searchbox','spinbutton'];
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
     roles.map(role=>'[role="'+role+'"]').join(',');
-  const overlayActive=[...document.querySelectorAll(
+  const overlayRoots=[...document.querySelectorAll(
     '[role="dialog"],[aria-modal="true"],[id*="cookie" i],[class*="cookie" i]'
-  )].some(e=>visible(e) && (()=>{const r=e.getBoundingClientRect();
+  )].filter(e=>visible(e) && (()=>{const r=e.getBoundingClientRect();
     return r.width>innerWidth*.2 && r.height>innerHeight*.1;})());
+  const overlayActive=overlayRoots.length>0;
   const role = e => {
     const explicit=e.getAttribute('role');
     if (roles.includes(explicit)) return explicit;
@@ -66,8 +67,7 @@
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
     // When a consent/modal layer is active, do not offer covered background controls.
     if (overlayActive) {
-      const hit=document.elementFromPoint(x,y);
-      if (!hit || !e.contains(hit)) continue;
+      if (!overlayRoots.some(root=>root.contains(e))) continue;
     }
     if (rname==='gridcell' && e.querySelector('button,[role="button"]')) continue;
     const base={node:identity(e),role:rname,label:name(e)||rname,

@@ -68,6 +68,17 @@ def main():
         passed.append("overlay blocked before input")
 
         browser.evaluate("document.body.innerHTML=" + repr("""
+          <button id="background">Background</button>
+          <div id="cookie-dialog" role="dialog" style="position:fixed;inset:20px;z-index:9999;background:white">
+            <button id="allow">Allow all cookies</button>
+          </div>
+        """))
+        page = browser.observe(screenshot=False)
+        labels = {a["label"] for a in page["actions"]}
+        assert "Allow all cookies" in labels and "Background" not in labels
+        passed.append("modal exposes only in-modal controls")
+
+        browser.evaluate("document.body.innerHTML=" + repr("""
           <form><p id="price">Total $10</p>
           <button type="button" id="buy">Buy</button>
           <label>Search <input id="query" role="combobox" aria-controls="suggestions"></label>
