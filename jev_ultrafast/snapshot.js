@@ -26,9 +26,12 @@
   const selector='a[href],button,input,textarea,select,summary,[contenteditable="true"],'+
     roles.map(role=>'[role="'+role+'"]').join(',');
   const overlayRoots=[...document.querySelectorAll(
-    '[role="dialog"],[aria-modal="true"],[id*="cookie" i],[class*="cookie" i]'
+    '[role="dialog"],[aria-modal="true"],[id*="cookie" i],[class*="cookie" i],'+
+    '[id*="modal" i],[class*="modal" i]'
   )].filter(e=>visible(e) && (()=>{const r=e.getBoundingClientRect();
-    return r.width>innerWidth*.2 && r.height>innerHeight*.1;})());
+    const style=getComputedStyle(e);
+    return r.width>innerWidth*.2 && r.height>innerHeight*.1 &&
+      style.position!=='static' && style.visibility!=='hidden';})());
   const overlayActive=overlayRoots.length>0;
   const role = e => {
     const explicit=e.getAttribute('role');

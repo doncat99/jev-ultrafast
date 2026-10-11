@@ -110,16 +110,30 @@ class Browser:
             if t.get("targetId") not in self._known_targets and t.get("openerId") == self.target
         ]
         self._known_targets.update(t.get("targetId") for t in new_targets)
-        resources = self.evaluate("""(() => [...document.querySelectorAll(
-          'a[href],area[href],iframe[src],embed[src],object[data],link[href]'
-        )].map(e => ({
-          tag:e.tagName.toLowerCase(),
-          text:(e.innerText||e.getAttribute('title')||e.getAttribute('aria-label')||'').trim(),
-          url:e.href || e.src || e.data || e.getAttribute('href') || e.getAttribute('src')
-        })).filter(x => x.url && (
-          /\\.(pdf)(?:[?#]|$)/i.test(x.url) ||
-          /report|annual|sustainab|esg|download/i.test(`${x.text} ${x.url}`)
-        )).slice(0,100))()""") or []
+        resources = self.evaluate("""(() => {
+          const fields = ['href','src','data','data-url','data-href','data-itemid','rel','addthis:url'];
+          const text = e => (e.innerText || e.getAttribute('title') || e.getAttribute('aria-label') ||
+            e.getAttribute('alt') || '').trim();
+          const absolute = value => {
+            if (!value) return null;
+            try { return new URL(value, location.href).href; } catch (_) { return null; }
+          };
+          const candidates = [];
+          for (const e of document.querySelectorAll('*')) {
+            const values = fields.map(name => [name, e.getAttribute(name)]).filter(([,value]) => value);
+            for (const [field, value] of values) {
+              const url = /^\\d+$/.test(value) ? absolute('/en/download/' + value) : absolute(value);
+              if (!url && !['data-itemid','rel'].includes(field)) continue;
+              candidates.push({tag:e.tagName.toLowerCase(), field, text:text(e), url,
+                identifier:/^\\d+$/.test(value) ? value : null,
+                page_url:location.href, source:e.outerHTML.slice(0,1200)});
+            }
+          }
+          return candidates.filter(x => x.url && (/\\.(pdf)(?:[?#]|$)/i.test(x.url) ||
+            /report|annual|sustainab|esg|download/i.test(`${x.text} ${x.url} ${x.source}`)) ||
+            x.identifier)
+            .filter((x,i,a) => a.findIndex(y => y.url === x.url && y.field === x.field) === i).slice(0,100);
+        })()""") or []
         return {
             "targets": [
                 {"target_id": t.get("targetId"), "type": t.get("type"), "url": t.get("url"), "title": t.get("title")}

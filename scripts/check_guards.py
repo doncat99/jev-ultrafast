@@ -79,6 +79,25 @@ def main():
         passed.append("modal exposes only in-modal controls")
 
         browser.evaluate("document.body.innerHTML=" + repr("""
+          <button id="background-year">2023</button>
+          <div id="download-modal" class="modal" style="position:fixed;inset:20px;z-index:9999;background:white">
+            <h2>2023 Integrated Report</h2>
+            <a addthis:url="https://global.toyota/en/download/44054553" data-itemid="44054553"
+              rel="44054543" href="#">Open report</a>
+          </div>
+        """))
+        page = browser.observe(screenshot=False)
+        labels = {a["label"] for a in page["actions"]}
+        assert "2023" not in labels and "Open report" in labels
+        resources = browser._result_observation()["resources"]
+        assert any(
+            r["url"] and r["url"].endswith("/en/download/44054553") and r["field"] == "addthis:url"
+            for r in resources
+        )
+        assert any(r["identifier"] == "44054553" and r["field"] == "data-itemid" for r in resources)
+        passed.append("dynamic modal hides background actions and records report identifiers")
+
+        browser.evaluate("document.body.innerHTML=" + repr("""
           <form><p id="price">Total $10</p>
           <button type="button" id="buy">Buy</button>
           <label>Search <input id="query" role="combobox" aria-controls="suggestions"></label>
