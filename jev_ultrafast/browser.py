@@ -78,7 +78,8 @@ class Browser:
                 )
             except RuntimeError:
                 pass
-        for attempt in range(10):
+        # Dynamic modal transitions can keep the DOM changing for longer than one frame.
+        for attempt in range(40):
             try:
                 page = browser_operation(
                     {"operation": "observe", "session": self.session, "screenshot": screenshot}
@@ -104,9 +105,9 @@ class Browser:
                     page["result_observation"] = observation
                 return page
             except StalePage:
-                if attempt == 9:
+                if attempt == 39:
                     raise
-                time.sleep(0.02)
+                time.sleep(0.05)
         raise StalePage("Page did not settle")
 
     def fresh(self, page, action=None):

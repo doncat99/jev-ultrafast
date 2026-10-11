@@ -33,6 +33,13 @@
     return r.width>innerWidth*.2 && r.height>innerHeight*.1 &&
       style.position!=='static' && style.visibility!=='hidden';})());
   const overlayActive=overlayRoots.length>0;
+  const topmost = (e, r) => {
+    const point=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);
+    if (!point) return false;
+    if (e.contains(point)) return true;
+    const label=e.id && [...document.querySelectorAll('label')].find(l=>l.htmlFor===e.id);
+    return !!label?.contains(point);
+  };
   const role = e => {
     const explicit=e.getAttribute('role');
     if (roles.includes(explicit)) return explicit;
@@ -68,6 +75,7 @@
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
+    if (overlayActive && !topmost(e,r)) continue;
     if (rname==='option' && e.querySelector('a[href],button,[role="button"]')) continue;
     // When a consent/modal layer is active, do not offer covered background controls.
     if (overlayActive) {

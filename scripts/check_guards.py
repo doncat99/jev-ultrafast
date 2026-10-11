@@ -79,6 +79,23 @@ def main():
         passed.append("modal exposes only in-modal controls")
 
         browser.evaluate("document.body.innerHTML=" + repr("""
+          <div id="report-modal" class="modal" style="position:fixed;inset:40px;z-index:2000;background:white">
+            <button id="background-download" style="position:absolute;right:40px;bottom:40px">Download</button>
+          </div>
+          <div id="agreement-modal" role="dialog" aria-modal="true"
+               style="position:fixed;inset:80px;z-index:3000;background:white">
+            <label style="display:block;margin:40px"><input id="agreement" type="checkbox">
+              I accept the agreement</label>
+            <button id="final-download" style="position:absolute;right:40px;bottom:40px">Download</button>
+          </div>
+        """))
+        page = browser.observe(screenshot=False)
+        downloads = [a for a in page["actions"] if a["label"] == "Download"]
+        assert len(downloads) == 1
+        assert any(a.get("role") == "checkbox" and a["label"] == "I accept the agreement" for a in page["actions"])
+        passed.append("topmost modal hides covered duplicate actions")
+
+        browser.evaluate("document.body.innerHTML=" + repr("""
           <button id="background-year">2023</button>
           <div id="download-modal" class="modal" style="position:fixed;inset:20px;z-index:9999;background:white">
             <h2>2023 Integrated Report</h2>
