@@ -68,6 +68,7 @@
     if (!safe(e) || !visible(e) || e.matches(':disabled') || e.closest('[aria-disabled="true"]')) continue;
     const r=e.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2, rname=role(e);
     if (!rname || r.width<=0 || r.height<=0 || x<0 || y<0 || x>=innerWidth || y>=innerHeight) continue;
+    if (rname==='option' && e.querySelector('a[href],button,[role="button"]')) continue;
     // When a consent/modal layer is active, do not offer covered background controls.
     if (overlayActive) {
       if (!overlayRoots.some(root=>root.contains(e))) continue;
